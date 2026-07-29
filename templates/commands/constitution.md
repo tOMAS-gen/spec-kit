@@ -14,6 +14,10 @@ $ARGUMENTS
 
 You **MUST** consider the user input before proceeding (if not empty).
 
+__SPECKIT_ASSIGNED_COMMAND_BLOCK_CONSTITUTION__
+
+## Command Workflow
+
 ## Scope Guard
 
 This command's own work is limited to updating the project constitution and propagating

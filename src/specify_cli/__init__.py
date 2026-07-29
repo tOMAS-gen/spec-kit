@@ -369,7 +369,7 @@ SKILL_DESCRIPTIONS = {
     "constitution": "Create or update project governing principles and development guidelines.",
     "checklist": "Generate custom quality checklists for validating requirements completeness and clarity.",
     "taskstoissues": "Convert tasks from tasks.md into GitHub issues.",
-    "models": "Detect the agent's available model catalog and write the models.json required by other commands.",
+    "models": "Build the global model/CLI registry and assign command executors interactively.",
     "flow-quick": "Run the short flow end-to-end (specify, plan, tasks, implement, converge) with one stop before implementation.",
     "flow-full": "Run the full flow end-to-end (constitution through converge, with quality gates) with one stop before implementation.",
 }

@@ -14,40 +14,11 @@ $ARGUMENTS
 
 You **MUST** consider the user input before proceeding (if not empty).
 
+__SPECKIT_ASSIGNED_COMMAND_BLOCK_ANALYZE__
+
+## Command Workflow
+
 ## Pre-Execution Checks
-
-**Model configuration gate (MANDATORY — before anything else)**:
-- Read `.specify/models.json` in the project root **first**. If that read succeeds, this is the configuration: use it and move on. Do **not** read, stat, or mention any other path.
-- Only when the project file does not exist, try `~/.specify/models.json`. That path is outside the project, so the host may deny access: a permission denial or any read error there means "not found" - never abort the command because of it.
-- Never abort this command because a configuration read failed while another configuration source already succeeded.
-- If NEITHER file exists, **STOP immediately**. Do not proceed with any other step. Output:
-
-  ```
-  ## Model Configuration Required
-
-  No models.json found (.specify/models.json or ~/.specify/models.json).
-  Spec Kit needs to know which models are available to this agent before running.
-
-  Run `__SPECKIT_COMMAND_MODELS__` first, then re-run this command.
-  ```
-
-- If a file exists, read it (project file wins) and keep it in context for this command:
-  - `manager` is the communicator/orchestrator: it classifies each task/step's level (1-5) and delegates; it never implements tasks.
-  - `by_complexity` maps task complexity levels (`5` = critical, `4` = complex, `3` = moderate/workhorse, `2` = simple, `1` = trivial, plus optional specialized keys) to the models that should execute such tasks.
-  - Level `5` models are reserved for very few cases (manager role, exceptional tasks) — never assign them to routine work.
-- If the file exists but cannot be parsed as JSON, or is missing `manager` or `by_complexity`, STOP and tell the user to re-run `__SPECKIT_COMMAND_MODELS__` to regenerate it.
-
-**Orchestrator dispatch (MANDATORY - this is a procedure you execute, not advice)**:
-
-You are the `manager` (communicator). **You have no permission to create or edit project artifacts in this command.** Every substantive step is performed by a worker agent that you dispatch.
-
-**Typical levels in this command**: cross-artifact consistency and coverage analysis → `4`; mechanical inventory passes (collecting requirements, task IDs, terminology) → `2`.
-
-__SPECKIT_DISPATCH_BLOCK__
-
-**Self-check before every `write`/`edit` call**: if you are about to create or modify a project file and you did not print a `DISPATCH` line for it, you are violating this command. Stop and dispatch instead. Reading files, running the prerequisite scripts, asking the user questions, merging worker output, and reporting are the only things you may do yourself.
-
-At the end of the command, list every `DISPATCH` line you emitted, so the user can see which levels and models did the work.
 
 **Check for extension hooks (before analysis)**:
 - Check if `.specify/extensions.yml` exists in the project root.

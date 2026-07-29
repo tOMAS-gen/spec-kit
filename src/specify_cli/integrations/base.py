@@ -163,42 +163,6 @@ class IntegrationBase(ABC):
         """Return options this integration accepts. Default: none."""
         return []
 
-    def dispatch_block(self) -> str:
-        """Return the CLI-specific orchestrator dispatch procedure.
-
-        Command templates carry a ``__SPECKIT_DISPATCH_BLOCK__`` placeholder
-        where the model-dispatch procedure lives.  The orchestrator concept
-        (5 complexity levels, dynamic classification, ordered fallback) is the
-        same for every CLI, but the *mechanism* used to hand a task to the
-        model of its level is CLI-specific — OpenCode dispatches to a named
-        subagent, Hermes spawns its own CLI with ``-m``, and so on.
-
-        The default returns the generic multi-mode block that reads every
-        ``executors`` mode from ``models.json``.  Integrations with a dedicated
-        mechanism override this to inject a block that speaks only their CLI's
-        route, so the skills written to disk mention nothing about other CLIs.
-        """
-        from .dispatch_blocks import GENERIC_DISPATCH_BLOCK
-
-        return GENERIC_DISPATCH_BLOCK
-
-    def executor_block(self) -> str:
-        """Return the CLI-specific "resolve an executor" block for ``models``.
-
-        The ``models`` command discovers the model catalog and writes
-        ``models.json`` with an ``executors`` map.  How a model is turned into
-        an executor is CLI-specific — OpenCode creates named subagents, Hermes
-        records a ``hermes chat -q -m`` command, and so on.  The ``models``
-        template carries a ``__SPECKIT_EXECUTOR_BLOCK__`` placeholder that each
-        integration fills with the block dedicated to its CLI, so the installed
-        ``models`` skill documents only its own executor mechanism.
-
-        The default returns the generic multi-mode block.
-        """
-        from .dispatch_blocks import GENERIC_EXECUTOR_BLOCK
-
-        return GENERIC_EXECUTOR_BLOCK
-
     def effective_invoke_separator(
         self,
         parsed_options: dict[str, Any] | None = None,
@@ -778,8 +742,6 @@ class IntegrationBase(ABC):
         arg_placeholder: str = "$ARGUMENTS",
         invoke_separator: str = ".",
         project_root: Path | None = None,
-        dispatch_block: str = "",
-        executor_block: str = "",
     ) -> str:
         """Process a raw command template into agent-ready content.
 
@@ -791,11 +753,9 @@ class IntegrationBase(ABC):
         4. Replace ``{ARGS}`` and ``$ARGUMENTS`` with *arg_placeholder*
         5. Replace ``__AGENT__`` with *agent_name*
         6. Rewrite paths: ``scripts/`` → ``.specify/scripts/`` etc.
-        7. Replace ``__SPECKIT_COMMAND_<NAME>__`` with invocation strings
-        8. Replace ``__SPECKIT_DISPATCH_BLOCK__`` with the CLI-specific
-           orchestrator dispatch procedure (*dispatch_block*).  When
-           *dispatch_block* is empty the placeholder is dropped, so a template
-           still renders on integrations that carry no dispatch logic.
+        7. Render ``__SPECKIT_ASSIGNED_COMMAND_BLOCK_<NAME>__`` as the generic
+           global-registry command executor.
+        8. Replace ``__SPECKIT_COMMAND_<NAME>__`` with invocation strings.
         """
         # 1. Extract script command from frontmatter
         script_commands: dict[str, str] = {}
@@ -882,18 +842,15 @@ class IntegrationBase(ABC):
 
         content = CommandRegistrar.rewrite_project_relative_paths(content)
 
+        # 7. Render global-registry command executor blocks before resolving
+        #    command references because the injected block tells users how to
+        #    invoke the models command when configuration is missing.
+        from .dispatch_blocks import resolve_assigned_command_blocks
+
+        content = resolve_assigned_command_blocks(content)
+
         # 8. Replace __SPECKIT_COMMAND_<NAME>__ with invocation strings
         content = IntegrationBase.resolve_command_refs(content, invoke_separator)
-
-        # 9. Replace __SPECKIT_DISPATCH_BLOCK__ with the CLI-specific dispatch
-        #    procedure. Empty dispatch_block drops the placeholder cleanly so a
-        #    template still renders on integrations that carry no dispatch logic.
-        from .dispatch_blocks import DISPATCH_PLACEHOLDER, EXECUTOR_PLACEHOLDER
-
-        if DISPATCH_PLACEHOLDER in content:
-            content = content.replace(DISPATCH_PLACEHOLDER, dispatch_block)
-        if EXECUTOR_PLACEHOLDER in content:
-            content = content.replace(EXECUTOR_PLACEHOLDER, executor_block)
 
         return content
 
@@ -1055,8 +1012,6 @@ class MarkdownIntegration(IntegrationBase):
             processed = self.process_template(
                 raw, self.key, script_type, arg_placeholder,
                 project_root=project_root,
-                dispatch_block=self.dispatch_block(),
-                executor_block=self.executor_block(),
             )
             dst_name = self.command_filename(src_file.stem)
             dst_file = self.write_file_and_record(
@@ -1262,8 +1217,6 @@ class TomlIntegration(IntegrationBase):
             processed = self.process_template(
                 raw, self.key, script_type, arg_placeholder,
                 project_root=project_root,
-                dispatch_block=self.dispatch_block(),
-                executor_block=self.executor_block(),
             )
             _, body = self._split_frontmatter(processed)
             toml_content = self._render_toml(description, body)
@@ -1498,8 +1451,6 @@ class YamlIntegration(IntegrationBase):
             processed = self.process_template(
                 raw, self.key, script_type, arg_placeholder,
                 project_root=project_root,
-                dispatch_block=self.dispatch_block(),
-                executor_block=self.executor_block(),
             )
             _, body = self._split_frontmatter(processed)
             yaml_content = self._render_yaml(
@@ -1705,8 +1656,6 @@ class SkillsIntegration(IntegrationBase):
                 raw, self.key, script_type, arg_placeholder,
                 project_root=project_root,
                 invoke_separator=self.invoke_separator,
-                dispatch_block=self.dispatch_block(),
-                executor_block=self.executor_block(),
             )
             # Strip the processed frontmatter — we rebuild it for skills.
             # Preserve leading whitespace in the body to match release ZIP

@@ -1,5 +1,5 @@
 ---
-description: Detect the agent hosting this conversation, discover its actually configured models from first-party runtime evidence, classify them into 5 complexity levels using live OpenRouter data (benchmark, speed, cost, context), and write models.json.
+description: Interactively build the global models.json, validate reusable CLI execution recipes, and assign ordered model executors to each eligible Spec Kit command.
 ---
 
 ## User Input
@@ -8,201 +8,473 @@ description: Detect the agent hosting this conversation, discover its actually c
 $ARGUMENTS
 ```
 
-You **MUST** consider the user input before proceeding (if not empty). Supported overrides include `--global`, pasted model-picker output, a manual model list, and explicit assignments such as `manager=X`, `n5=X,Y`, `n4=A,B`, `n3=C,D`, `n2=E,F`, or `n1=G,H`.
+You **MUST** consider the user input before proceeding (if not empty). The user
+may provide CLI names, executable paths, model-picker output, unlisted model
+IDs, official documentation, administration instructions, or corrections to a
+proposed execution recipe.
 
 ## Goal
 
-Create a `models.json` containing only models that the agent hosting **this conversation** can select now, plus an execution route for each assigned model. Classify every discovered model into one of **5 complexity levels** using live OpenRouter data (never a static table — recalculate every run), and assign an ordered candidate chain to every level: the first model is the primary executor and the remaining models are alternatives used when a model is unavailable, rate-limited, out of usage/tokens, or exceeds its context limit.
+Build or update the global registry at `~/.specify/models.json`.
 
-- Project file: `.specify/models.json` (default and highest precedence)
-- User file: `~/.specify/models.json` (with `--global`; fallback for other commands)
+This command is a universal registry builder. It must learn enough about the
+CLIs selected by the user to construct the file; it must not contain or rely on
+a built-in catalog of CLI names, model names, model aliases, or vendor-specific
+commands. A CLI or model used in examples elsewhere is never evidence that it
+exists on this machine.
 
-Every other Spec Kit command except `__SPECKIT_COMMAND_CONSTITUTION__` requires this file.
+The completed registry has exactly three operational catalogs:
+
+- `models`: an array whose entries are keyed by canonical model name. Each
+  model records the CLIs that can run it, the exact model name used by each CLI,
+  the effective context window, supported effort levels, and a complete
+  OpenRouter-derived description.
+- `clis`: an array whose entries are keyed by CLI name. Each CLI records a
+  structured recipe that explains how to launch it with the selected model,
+  input text, effort level, context window, and project working directory.
+- `commands`: an array whose entries are keyed by eligible Spec Kit command
+  name. Each command records an ordered list of user-approved CLI, model,
+  effort, and context-window combinations. The first combination is the
+  default and the remaining combinations are alternatives.
+
+This command does **not** choose a manager, assign implementation tasks, or
+execute workflow commands. It analyzes each eligible command's actual workflow
+requirements to recommend its executors.
+
+## Non-Negotiable Rules
+
+1. Always write the global file `~/.specify/models.json`. Do not create a
+   project-local `.specify/models.json`.
+2. Ask the user which CLIs to integrate. Detecting an executable does not grant
+   permission to add it automatically.
+3. Do not hard-code knowledge for a particular CLI or model. Learn from the
+   executable, official documentation, and the user.
+4. Ask whether the user wants to add models that the selected CLI does not
+   display but can execute. Treat those models exactly like displayed models.
+5. The final JSON contains no discovery source, verification status, hidden
+   flag, or distinction between automatically discovered and user-provided
+   information.
+6. Never persist an incomplete model or an unexecutable CLI recipe. Keep
+   incomplete work only in the current conversation and ask for the missing
+   information.
+7. Never store credentials, API keys, authorization headers, session tokens,
+   or secret environment values.
+8. Represent process arguments as an array. Never store a shell command string
+   that requires interpolation or evaluation.
+9. Assign executors only to `constitution`, `specify`, `clarify`, `plan`,
+   `checklist`, `tasks`, `analyze`, `taskstoissues`, and `converge`. Never add a
+   command assignment for `models`, `implement`, `flow-quick`, or `flow-full`.
+10. Recommendations are advisory. The user decides the default executor and
+    every ordered alternative.
 
 ## Execution Steps
 
-### 1. Establish where the conversation is running
+### 1. Load the existing global registry
 
-Determine these facts before discovering any model:
+Resolve `~/.specify/models.json` using the host user's home directory.
 
-1. **Project root**: resolve the current working directory and locate the nearest project root containing `.specify/` or the repository root where `.specify/` will be created.
-2. **Runtime agent**: identify the exact application or CLI hosting this conversation from runtime/system context, available tools, process/environment evidence, or explicit user input.
-3. **Installed Spec Kit integration**: if `<project-root>/.specify/integration.json` exists, read its active integration. Record it separately from the runtime agent. It indicates where Spec Kit commands were installed; it does **not** prove which agent is hosting this conversation.
-4. **Provider route**: identify any configured gateway, proxy, provider, or custom base URL used by this session without exposing credentials.
+- If it does not exist, start with empty `models`, `clis`, and `commands`
+  arrays.
+- If it exists, parse and validate it before doing anything else.
+- If the file is invalid JSON or does not follow the schema in this command,
+  STOP and show the validation errors. Do not overwrite it.
+- Preserve integrations the user does not select during this run.
+- Never display secrets found in surrounding CLI configuration.
 
-If runtime evidence conflicts with `.specify/integration.json`, use the **runtime agent** for model discovery and report the mismatch. If the runtime agent cannot be identified reliably, STOP and ask the user which agent/CLI is hosting the conversation. Do not infer it from command-file syntax, folder names, or the installed integration alone.
+The command is incremental: it can create the registry, add another CLI,
+refresh an existing CLI, add models, update model metadata, or revise command
+assignments without rebuilding unrelated integrations.
 
-### 2. Discover configured models from the runtime agent
+### 2. Detect candidates and ask which CLIs to integrate
 
-Do **not** derive a catalog from the agent name, provider name, executable name, public vendor documentation, memory, or commonly available models. A model is eligible only when first-party evidence shows that this runtime can select it.
+Inspect the local environment for executable AI CLIs using available runtime
+evidence such as PATH, installed Spec Kit integration metadata, running host
+context, package-manager metadata, and explicit user input.
 
-Use the strongest available discovery mechanism in this order:
+Present the detected candidates with their executable path and version when
+available. Then **ask the user which detected CLIs to integrate**. The prompt
+must support:
 
-1. Invoke the runtime agent's native model-list command, API, or picker through the tools exposed by the host and capture the result.
-2. Query the configured gateway's model endpoint only when runtime configuration proves that this session uses that gateway. Treat the returned identifiers as selectable only if the agent supports gateway discovery.
-3. Observe the runtime agent's actual model picker. If it is an interactive chat command or UI that cannot be invoked by the agent itself, ask the user to open it and paste or share the complete output.
-4. Accept an explicit model list supplied by the user and record the source as `user_provided`.
+- selecting one or more detected CLIs;
+- entering an executable name or absolute path that was not detected;
+- refreshing a CLI already present in the global registry;
+- declining all candidates without changing the file.
 
-Rules:
+Do not assume the CLI hosting this conversation is the only CLI to integrate.
+Do not automatically integrate every detected executable.
 
-- A help page showing only a `--model` option is not a model catalog.
-- Do not execute an interactive slash command as a shell command.
-- Do not substitute a vendor's public `/v1/models` response for the agent's configured picker.
-- Preserve exact selectable IDs, including provider prefixes and variants.
-- Capture the discovery command/mechanism and enough non-secret evidence to explain the result.
-- If no trustworthy list can be obtained, STOP and request the picker output. Never create `models.json` from guesses.
+### 3. Learn how each selected CLI is administered
 
-For each discovered model, record only supported facts:
+For every selected CLI, determine:
 
-- `id`: exact selectable model identifier (required)
-- `provider`: provider or gateway namespace when shown
-- `context`: context window when shown
-- `reasoning`: reasoning/thinking capability when shown
-- `availability`: relevant usage, quota, or access restriction when shown
-- `note`: selectable variant or specialization shown by the source
-- `tier`: derived level (`5`, `4`, `3`, `2`, or `1`) assigned in the next step; this is an assessment, not discovery evidence
+- executable name or absolute path;
+- installed version;
+- non-interactive invocation mode;
+- how to list or select models;
+- how to pass the exact model ID;
+- how to provide the task text: standard input, argument, or file;
+- how to set reasoning/effort and which values are accepted;
+- how to set or enforce the context window;
+- how to set the project working directory;
+- how completion and a non-zero failure are reported.
 
-### 3. Classify models into 5 levels with OpenRouter data
+Use this evidence in order:
 
-Classify every discovered model into 5 complexity levels using **live data from OpenRouter**. Never use a static table, never rank from model names alone — recalculate every run. This classification is CLI-agnostic; the incorporation into each CLI happens in step 4.
+1. Safe local introspection such as version, help, config inspection, and
+   native model-list commands.
+2. Official documentation for the installed CLI version.
+3. User-provided documentation or administration instructions.
 
-**3.1 Fetch model data (3 lightweight JSON calls, no browser, no scraping):**
+If local introspection and official sites do not explain how the CLI is
+administered, ask whether the user can provide a reference or explain the
+required commands. Do not improvise vendor-specific flags.
 
-| Data | Endpoint | Field used |
+An interactive slash command is not automatically a shell command. If the
+model picker can only be opened interactively, ask the user to open it and
+provide its complete contents.
+
+### 4. Discover all models the user wants registered
+
+Obtain the displayed model list from the strongest mechanism available:
+
+1. native machine-readable model-list command or API;
+2. native interactive model picker supplied by the user;
+3. official documentation that applies to the installed CLI and account;
+4. an explicit model list supplied by the user.
+
+Preserve the exact model identifier accepted by the CLI.
+
+After collecting the displayed list, always ask:
+
+> Do you want to add any model that this CLI does not display but you know it
+> can execute?
+
+For every additional model, collect its exact CLI model ID and process it
+through the same context, effort, OpenRouter enrichment, and execution checks
+as any displayed model. The final registry must not label it as hidden,
+unlisted, manual, user-provided, or less trusted.
+
+Resolve a canonical model key for each model. Prefer the exact OpenRouter model
+ID when a match exists. Otherwise ask the user for the stable
+`provider/model-name` key to use. Never derive an unfamiliar canonical key from
+the model name alone.
+
+If the same canonical model is available through multiple CLIs, create one
+entry in `models` and append one availability entry per CLI. For each
+availability collect:
+
+- `cli`: key of the corresponding entry in `clis`;
+- `model`: exact identifier passed to that CLI;
+- `context_window`: effective maximum context accepted through that CLI;
+- `effort_levels`: exact effort values that combination accepts, or an empty
+  array when effort is unsupported.
+
+The effective CLI context window wins over a larger theoretical provider
+window. A context window must be a positive integer token count; labels such as
+`large` or `1M` must be converted to exact tokens before writing.
+
+### 5. Build the complete model description
+
+Use current OpenRouter data to populate every model's `description`. Fetch
+current JSON data rather than relying on memory or a static model table:
+
+| Data | Preferred OpenRouter endpoint | Required output |
 |---|---|---|
-| Price + context | `https://openrouter.ai/api/v1/models` | `pricing.prompt` / `pricing.completion`, `context_length` |
-| Intelligence | `https://openrouter.ai/api/frontend/v1/rankings/benchmarks` | `data.aaData.percentilesBySlug[slug].intelligence` (Artificial Analysis percentile 0-100) |
-| Speed | `https://openrouter.ai/api/frontend/v1/rankings/performance` | `p50_throughput` (tok/s), `p50_latency` (ms) |
+| Model identity, pricing, context | `https://openrouter.ai/api/v1/models` | canonical ID and input/output price |
+| Intelligence | `https://openrouter.ai/api/frontend/v1/rankings/benchmarks` | normalized score and concise summary |
+| Speed | `https://openrouter.ai/api/frontend/v1/rankings/performance` | normalized score, throughput, and concise summary |
 
-If an endpoint is unreachable, fall back to model metadata from discovery plus explicit user guidance, and record that data-driven classification was degraded.
+Match against the live returned IDs and metadata. Do not maintain a static alias
+table in this command.
 
-**3.2 Match each discovered model to its OpenRouter slug:**
+Every `description` must contain:
 
-- Normalize: strip provider prefixes, variant suffixes (`-review`, `-highspeed`, `-thinking`, `-free`), date suffixes (`-20251001`), and leading `~`.
-- Variants inherit the base model's data.
-- Keep a small manual alias table for slugs that differ (e.g. `kimi-latest` → the current flagship slug it points to).
-- Do not rank opaque or unfamiliar model IDs from their names alone. If a model has no OpenRouter match and no benchmark, apply the unmeasured rule below; ask the user when evidence cannot support any classification.
+- `intelligence.score`: normalized number from 0 through 100;
+- `intelligence.summary`: concise capability description;
+- `speed.score`: normalized number from 0 through 100;
+- `speed.tokens_per_second`: positive measured or documented throughput;
+- `speed.summary`: concise speed/latency description;
+- `cost.input_per_million`: USD cost per one million input tokens;
+- `cost.output_per_million`: USD cost per one million output tokens;
+- `cost.currency`: `USD`;
+- `benefits`: a non-empty array describing the model's strongest practical
+  uses based on its intelligence, speed, context, capabilities, and cost.
 
-**3.3 Compute per model:**
+Zero is valid for a free model's input or output cost. Missing data is not the
+same as zero.
 
-- `intel`: intelligence percentile (0-100). It is **relative** — it drops as newer better models appear.
-- `speed`: best `p50_throughput` across providers.
-- `price blend`: `0.75 × input price + 0.25 × output price` (agentic usage is input-dominated).
-- `cost-benefit`: `intel ÷ max(blend, 0.05)`.
+When OpenRouter does not contain a selected model or lacks any required value:
 
-**3.4 Assign the level by benchmark** (capability defines the ceiling of what the model can solve):
+1. Look for official provider documentation.
+2. Ask whether the user can provide a reference containing the missing
+   intelligence, speed, cost, context, or capability information.
+3. Use the supplied reference to complete the same `description` shape.
+4. If the data still cannot be completed, do not add or update that model and
+   do not finalize a new registry that depends on it.
 
-- **N5 (critical)**: intel ≥ 94 — full architecture, irreversible decisions, security. Used rarely.
-- **N4 (complex)**: intel 85–93 — design decisions, large features, non-obvious debugging.
-- **N3 (moderate)**: intel 60–84 — the workhorse; most real work lands here.
-- **N2 (simple)**: intel 40–59 — single-file changes, obvious bugs, mechanical work.
-- **N1 (trivial)**: intel < 40 — direct questions, lookups, formatting.
-- **Unmeasured models** (no benchmark): price ≤ $0.30/M → N1; fast (>100 tok/s) and < $1/M → N2; otherwise N3.
+Do not persist source, provenance, confidence, verification, or discovery
+metadata in the final JSON.
 
-**3.5 Order each level's list:**
+### 6. Construct a reusable CLI execution recipe
 
-- Order candidates within a level by cost-benefit, preferring ~1M context. Beware high cost-benefit with low benchmark: cheap does not help if the model cannot solve the task.
-- Prefer alternatives with an independent provider/quota route when capability is adequate, so exhausting one model's allowance does not exhaust every fallback.
-- Keep each fallback capable of completing that level. Never add a weak model merely to make the list longer.
+Build one CLI entry from the learned administration contract. The recipe must
+be data, not prose and not a vendor-specific block injected by the integration
+that installed this command.
 
-Assignment rules:
+Required recipe behavior:
 
-- `manager`: the communicator/orchestrator model — the single entry point. It receives every command, classifies each task/step's level (1-5) itself, and delegates. It NEVER implements; classifying is part of its communicator role. Choose the strongest model for specification, planning, decomposition, and orchestration.
-- Each level maps to an **ordered non-empty list**: primary first, then alternatives in fallback order.
-- Reserve the manager from implementation when enough other models exist. Small catalogs may reuse the same model across roles and levels.
-- Apply explicit user assignments after validating that every assigned ID exists in the discovered catalog.
+- `executable` identifies the program to launch.
+- `version` records the installed version for which the recipe was built.
+- `execution.argv` is the argument array passed after the executable.
+- `{model}` marks the exact CLI model ID.
+- `{text}` marks task text when text is passed as an argument or file path.
+- `{effort}` marks the effort value when configurable.
+- `{context_window}` marks the token limit when configurable.
+- `{project_root}` marks the working directory.
+- `execution.text` defines whether text travels by `stdin`, `argument`, or
+  `file`.
+- `execution.effort` defines whether effort is set by `argument`, `config`,
+  `fixed`, or `unsupported`.
+- `execution.context_window` defines whether context is set by `argument`,
+  `config`, `fixed`, or `automatic`.
 
-Before writing, show the detected environment, discovery evidence, catalog, proposed manager, and ordered candidates for each level (N1-N5), including the benchmark percentile, blended price, and cost-benefit behind each classification. Ask the user to confirm or adjust the assignments. Skip this confirmation only when the user already supplied complete explicit assignments for `manager`, `n5`, `n4`, `n3`, `n2`, and `n1`.
+If effort or context is not exposed as a command argument, record its real
+mode. Do not invent a flag merely to include a placeholder.
 
-### 4. Resolve an executor for every assigned model
+### 7. Test before writing
 
-Discover execution capabilities from the **runtime**, not from the product name. Inspect the task/subagent tool schemas and agent configuration already loaded by the host. Never assume that a model picker implies programmatic per-task model selection.
+Validate the learned contract in increasing order of cost:
 
-__SPECKIT_EXECUTOR_BLOCK__
+1. Confirm the executable resolves and its version matches the recipe.
+2. Confirm the argument structure is accepted using non-consuming help,
+   validation, or dry-run support when available.
+3. Confirm text transport and working-directory behavior.
+4. Confirm model selection, effort values, and context behavior.
+5. Detect silent fallback to a default model when the CLI exposes enough
+   runtime information to do so.
 
-### 5. Write models.json
+Before a probe that may consume paid tokens, quota, or create remote state,
+explain the probe and ask the user for approval. If no safe probe exists, ask
+the user to run or confirm the invocation. Do not write a recipe known to fail.
 
-Write `.specify/models.json`, or `~/.specify/models.json` with `--global`, creating its parent directory when needed:
+These checks are construction steps only. Do not write `verified`, `status`,
+`source`, `listed`, or similar fields to the registry.
+
+### 8. Recommend and confirm command executors
+
+After the model and CLI catalogs are complete, build assignments for exactly
+these eligible commands:
+
+1. `constitution`
+2. `specify`
+3. `clarify`
+4. `plan`
+5. `checklist`
+6. `tasks`
+7. `analyze`
+8. `taskstoissues`
+9. `converge`
+
+Do not create assignments for:
+
+- `models`, because it constructs this registry;
+- `implement`, because it executes the CLI/model assignments already attached
+  to individual implementation tasks;
+- `flow-quick` and `flow-full`, because they only run command sequences.
+
+For each eligible command:
+
+1. Read the command's purpose, workflow, expected artifacts, and operational
+   constraints. Evaluate those requirements directly.
+2. Evaluate available CLI/model combinations using:
+   - model intelligence and relevant benefits;
+   - effective context window through that CLI;
+   - supported effort levels;
+   - speed;
+   - input and output cost;
+   - the tested CLI execution recipe.
+3. Recommend one default combination and explain briefly why it fits.
+4. Offer other viable combinations, including a different CLI or model when
+   available so one unavailable route does not block the command.
+5. Ask the user to accept the recommendation, choose another combination, and
+   optionally add one or more alternatives.
+
+Allow the user to accept all recommendations together, then review or override
+individual commands. Never save a recommendation as a decision before the user
+confirms it.
+
+Each assignment is an ordered array:
+
+- index `0` is the default executor;
+- index `1` and later are alternatives tried in order when the preceding
+  combination cannot be launched or its CLI/model is unavailable;
+- the array order is not load balancing and does not authorize parallel
+  execution.
+
+Each combination contains:
+
+- `cli`: an existing key from `clis`;
+- `model`: an existing canonical key from `models`;
+- `effort`: one exact effort value supported by that model through that CLI, or
+  `null` only when the CLI does not support configurable effort;
+- `context_window`: a positive token count no larger than that model's
+  effective context window through the selected CLI.
+
+The assignment uses the canonical model key, not the CLI-specific model string.
+At execution time, the selected model's matching availability entry supplies
+the exact CLI model ID.
+
+### 9. Show the proposed registry change
+
+Before writing:
+
+1. Show the CLIs that will be added or refreshed.
+2. Show every model and its CLI-specific context and effort values.
+3. Show intelligence, speed, cost, and benefits.
+4. Show the structured execution recipe with secrets redacted.
+5. Show the default and ordered alternatives for every eligible command,
+   including CLI, model, effort, and context window.
+6. Explain which existing entries or assignments will change or be removed.
+7. Ask the user to confirm the final update.
+
+Do not remove a CLI, model, or availability merely because discovery failed in
+this run. Removal requires explicit user confirmation.
+
+### 10. Write the global JSON
+
+Write this schema to `~/.specify/models.json`:
 
 ```json
 {
-  "version": 1,
-  "runtime": {
-    "agent": "<runtime agent>",
-    "integration": "<active Spec Kit integration or null>",
-    "project_root": "<absolute project root>",
-    "provider_route": "<direct, gateway name/base URL, or unknown>"
-  },
-  "discovery": {
-    "source": "agent_command | agent_picker | gateway_endpoint | user_provided",
-    "mechanism": "<command, API, or UI used>",
-    "detected_at": "<ISO-8601 timestamp>"
-  },
-  "catalog": [
+  "version": 2,
+  "models": [
     {
-      "id": "<exact selectable model id>",
-      "provider": "<provider if known>",
-      "context": "<context if known>",
-      "reasoning": true,
-      "tier": "<5 | 4 | 3 | 2 | 1>",
-      "intel": "<benchmark percentile 0-100 or null>",
-      "blend_price": "<0.75*input + 0.25*output $/M or null>",
-      "availability": "<restriction if known>",
-      "note": "<variant or specialization if known>"
+      "<canonical-model-id>": {
+        "availability": [
+          {
+            "cli": "<cli-key>",
+            "model": "<exact-cli-model-id>",
+            "context_window": 0,
+            "effort_levels": ["<exact-effort-value>"]
+          }
+        ],
+        "description": {
+          "intelligence": {
+            "score": 0,
+            "summary": "<capability summary>"
+          },
+          "speed": {
+            "score": 0,
+            "tokens_per_second": 0,
+            "summary": "<speed summary>"
+          },
+          "cost": {
+            "input_per_million": 0,
+            "output_per_million": 0,
+            "currency": "USD"
+          },
+          "benefits": [
+            "<strong practical use>"
+          ]
+        }
+      }
     }
   ],
-  "manager": "<model id>",
-  "by_complexity": {
-    "5": ["<primary>", "<fallback 1>", "<fallback 2>"],
-    "4": ["<primary>", "<fallback 1>"],
-    "3": ["<primary>", "<fallback 1>"],
-    "2": ["<primary>", "<fallback 1>"],
-    "1": ["<primary>", "<fallback 1>"]
-  },
-  "executors": {
-    "<model id>": {
-      "mode": "<executor mode for this CLI>"
+  "clis": [
+    {
+      "<cli-key>": {
+        "executable": "<executable-name-or-absolute-path>",
+        "version": "<installed-version>",
+        "execution": {
+          "argv": ["<argument>", "{model}"],
+          "text": {
+            "transport": "stdin | argument | file",
+            "placeholder": "{text}",
+            "argument": "<flag-or-null>"
+          },
+          "effort": {
+            "mode": "argument | config | fixed | unsupported",
+            "placeholder": "{effort}",
+            "argument": "<flag-or-null>"
+          },
+          "context_window": {
+            "mode": "argument | config | fixed | automatic",
+            "placeholder": "{context_window}",
+            "argument": "<flag-or-null>"
+          },
+          "working_directory": "{project_root}"
+        }
+      }
     }
-  }
+  ],
+  "commands": [
+    {
+      "<eligible-command-name>": [
+        {
+          "cli": "<cli-key>",
+          "model": "<canonical-model-id>",
+          "effort": "<exact-effort-value-or-null>",
+          "context_window": 0
+        }
+      ]
+    }
+  ]
 }
 ```
 
-The exact `executors` entry shape (which `mode`, and whether it carries `agent`, `command`, or `instructions`) is defined by the executor-resolution section above for the CLI hosting this conversation — follow that shape for every assigned model.
+The zeroes and angle-bracket strings above are schema placeholders, not values
+to copy. Every written value must be complete and reflect the selected CLI and
+model.
 
-Omit unknown optional model fields instead of filling them with guesses.
+Validation before committing the file:
 
-Validate before writing:
+- `version` equals `2`.
+- `models`, `clis`, and `commands` are non-empty arrays.
+- Every element of the three arrays is an object with exactly one dynamic key.
+- Canonical model keys, CLI keys, and command keys are unique.
+- Every model has at least one availability.
+- Every availability references an existing CLI key.
+- Every context window is a positive integer.
+- Every effort level is an exact value accepted by that CLI/model combination.
+- Every model description contains complete intelligence, speed, cost, and
+  non-empty benefits.
+- Every CLI has a non-empty executable, version, argument array, text
+  transport, effort mode, context mode, and working directory.
+- `commands` contains exactly the nine eligible command keys and none of the
+  four excluded command keys.
+- Every eligible command has at least one executor combination.
+- The first combination is the default and later combinations are ordered
+  alternatives, with no duplicate combination in the same command.
+- Every command combination references an existing canonical model and CLI.
+- The referenced model has an availability entry for the referenced CLI.
+- The selected effort is listed in that availability, or is `null` only when
+  effort is unsupported.
+- The selected context window is positive and does not exceed the effective
+  context window in that availability.
+- Every placeholder used by `argv` is defined by the recipe.
+- `argv` does not contain the executable and is never a shell command string.
+- The JSON contains no credentials and no construction-only status or
+  provenance fields.
+- Reparse the file after writing and run the same validation again.
 
-- `runtime.agent`, `discovery.source`, and `discovery.mechanism` are non-empty.
-- `catalog` is non-empty and contains unique exact IDs.
-- Every catalog entry has one valid `tier`: `5`, `4`, `3`, `2`, or `1`.
-- `manager` and every ID in `by_complexity` exist in `catalog`.
-- `5`, `4`, `3`, `2`, and `1` each contain at least one model and no duplicate IDs. When the catalog is too small to fill every level with a distinct model, reuse capable models across levels rather than leaving a level empty.
-- Every assigned ID has exactly one `executors` entry, in a mode this CLI actually supports (per the executor-resolution section above), with its required field populated (the `agent`, `command`, or `instructions` that section requires). Dispatch is optimistic: no verification state is stored, and a failed invocation falls through to the next candidate.
-- The target contains valid JSON after writing.
+Write atomically: create a temporary file beside the destination, validate it,
+then replace the destination so an interrupted update cannot corrupt the
+existing registry.
 
-### 6. Fallback contract used by implementation
-
-The list order is the complete dispatch policy; no separate load-balancing strategy is implied.
-
-1. The manager (communicator) classifies each task/step's level (1-5) using the level criteria, then looks up that level's ordered list.
-2. Start each task with the first candidate for its level.
-3. Resolve the candidate's executor and dispatch it using the mechanism defined by the executor-resolution section above for this CLI (that section is the single source of truth for how a model is invoked here). There is no verification gate: if the invocation itself fails (the worker could not be invoked, a non-zero exit, or the model is unavailable), treat it as an availability failure and continue with the next candidate.
-4. On a model-level availability failure (connection failure, usage/token exhaustion, rate limit, unavailable model, provider outage, or context limit), preserve the task state and retry with the next candidate that has a ready executor.
-5. Pass the next candidate the original task plus the latest verified progress, changed files, test results, and remaining work so it continues rather than blindly restarting.
-6. Never retry the same failed candidate in a loop. If the next candidate is `manual`, pause with exact switch/continuation instructions. Stop after the ordered list is exhausted and report every attempted model and failure.
-7. Do not hide code/test failures by switching models. Diagnose ordinary implementation failures normally; fallback is for model availability/capacity failures.
-
-### 7. Completion report
+### 11. Completion report
 
 Report:
 
-- Written path and project/global scope
-- Runtime agent, installed integration, and any mismatch
-- Discovery source and mechanism
-- Number of models discovered
-- Manager (communicator) and rationale
-- Primary and ordered alternatives for every level N1-N5, with the benchmark percentile and cost-benefit behind each classification
-- Executor mode for every assigned model
-- Configuration files created, restart reminder for hosts that load agents at startup, and any manual-only fallback
-- Reminder to rerun `__SPECKIT_COMMAND_MODELS__` whenever agent configuration or model availability changes (benchmark percentiles are relative — classification must be recalculated, never cached as a static table)
+- global path written;
+- CLIs added or refreshed;
+- models added or updated;
+- effective context window and effort levels for every CLI/model pairing;
+- intelligence, speed, input/output cost, and benefits for every model;
+- exact structured execution recipe for every CLI, with secrets redacted;
+- default and ordered alternative executors for every eligible command;
+- entries preserved unchanged;
+- any model omitted because its required information could not be completed.
+
+Remind the user to rerun this command after installing, removing, or upgrading a
+CLI, changing account model access, or learning that an additional unlisted
+model is available.

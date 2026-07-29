@@ -23,40 +23,11 @@ $ARGUMENTS
 
 You **MUST** consider the user input before proceeding (if not empty).
 
+__SPECKIT_ASSIGNED_COMMAND_BLOCK_TASKS__
+
+## Command Workflow
+
 ## Pre-Execution Checks
-
-**Model configuration gate (MANDATORY — before anything else)**:
-- Read `.specify/models.json` in the project root **first**. If that read succeeds, this is the configuration: use it and move on. Do **not** read, stat, or mention any other path.
-- Only when the project file does not exist, try `~/.specify/models.json`. That path is outside the project, so the host may deny access: a permission denial or any read error there means "not found" - never abort the command because of it.
-- Never abort this command because a configuration read failed while another configuration source already succeeded.
-- If NEITHER file exists, **STOP immediately**. Do not proceed with any other step. Output:
-
-  ```
-  ## Model Configuration Required
-
-  No models.json found (.specify/models.json or ~/.specify/models.json).
-  Spec Kit needs to know which models are available to this agent before running.
-
-  Run `__SPECKIT_COMMAND_MODELS__` first, then re-run this command.
-  ```
-
-- If a file exists, read it (project file wins) and keep it in context for this command:
-  - `manager` is the communicator/orchestrator: it classifies each task/step's level (1-5) and delegates; it never implements tasks.
-  - `by_complexity` maps task complexity levels (`5` = critical, `4` = complex, `3` = moderate/workhorse, `2` = simple, `1` = trivial, plus optional specialized keys) to an **ordered list** of models that can execute such tasks. The first model is the primary; the rest are alternatives used in order if the primary is unavailable, rate-limited, or runs out of usage/tokens/context. `executors` records whether each model can run through a subagent native to the current host, only in the current session, or manually.
-  - The `manager` model is reserved for planning and orchestration when the catalog has enough alternatives; assign it to implementation only for an exceptionally hard task, a small catalog, or an explicit user override.
-- If the file exists but cannot be parsed as JSON, or is missing `manager` or `by_complexity`, STOP and tell the user to re-run `__SPECKIT_COMMAND_MODELS__` to regenerate it.
-
-**Orchestrator dispatch (MANDATORY - this is a procedure you execute, not advice)**:
-
-You are the `manager` (communicator). **You have no permission to create or edit project artifacts in this command.** Every substantive step is performed by a worker agent that you dispatch.
-
-**Typical levels in this command**: decomposing the plan into a dependency-ordered task list → `3`; assigning the per-task `[C:n<level>->model]` labels stays with the manager, since classifying is its own role.
-
-__SPECKIT_DISPATCH_BLOCK__
-
-**Self-check before every `write`/`edit` call**: if you are about to create or modify a project file and you did not print a `DISPATCH` line for it, you are violating this command. Stop and dispatch instead. Reading files, running the prerequisite scripts, asking the user questions, merging worker output, and reporting are the only things you may do yourself.
-
-At the end of the command, list every `DISPATCH` line you emitted, so the user can see which levels and models did the work.
 
 **Check for extension hooks (before tasks generation)**:
 - Check if `.specify/extensions.yml` exists in the project root.
@@ -184,7 +155,7 @@ The tasks.md should be immediately executable - each task must be specific enoug
 Every task MUST strictly follow this format:
 
 ```text
-- [ ] [TaskID] [P?] [Story?] [C:n<level>->model] Description with file path
+- [ ] [TaskID] [P?] [Story?] [E:cli=<cli>|model=<model>|effort=<effort>|context=<tokens>] Description with file path
 ```
 
 **Format Components**:
@@ -198,23 +169,34 @@ Every task MUST strictly follow this format:
    - Foundational phase: NO story label
    - User Story phases: MUST have story label
    - Polish phase: NO story label
-5. **[C:...] complexity/model label**: REQUIRED for every task. Format: `[C:n5->model-id]`, `[C:n3->model-id]`, `[C:n1->model-id]`
-   - Assess each task's complexity as the manager (communicator) model, using the 5-level scale:
-     - `n5` — full architecture, irreversible decisions, security (rare)
-     - `n4` — design decisions, large features, non-obvious debugging
-     - `n3` — standard implementation, code edits, typical tests (the workhorse; most tasks land here)
-     - `n2` — single-file changes, obvious bugs, mechanical edits
-     - `n1` — docs, renames, config, formatting, boilerplate
-   - Then map the level to a model id from the `by_complexity` section of the loaded `models.json` (pick the first listed model for that level, or a specialized key when it clearly fits, e.g. `review`)
-   - Use the first model listed for the selected level. Do not substitute the manager unless it appears in that candidate list.
+5. **[E:...] execution label**: REQUIRED for every task. It records the exact
+   executor assignment that `implement` must use.
+   - Read the global `~/.specify/models.json` version 2 `models` and `clis`
+     catalogs.
+   - Evaluate the task's actual requirements directly, including affected
+     artifacts, reasoning needs, tools, context size, dependencies, and risk.
+   - Select one CLI/model combination capable of the task based on
+     intelligence, relevant benefits, effective context, supported effort,
+     speed, and cost.
+   - `cli` must be an existing key from `clis`.
+   - `model` must be the canonical model key from `models`, not the
+     CLI-specific model string.
+   - The model must contain an availability entry for the selected CLI.
+   - `effort` must be one value from that availability's `effort_levels`, or
+     the literal `null` when effort is unsupported.
+   - `context` must be a positive token count no larger than that
+     availability's `context_window`.
+   - Write the label exactly as
+     `[E:cli=<cli>|model=<model>|effort=<effort>|context=<tokens>]`.
+     Do not omit fields and do not defer executor selection to `implement`.
 6. **Description**: Clear action with exact file path
 
 **Examples**:
 
-- ✅ CORRECT: `- [ ] T001 [C:n1->flash-lite] Create project structure per implementation plan`
-- ✅ CORRECT: `- [ ] T005 [P] [C:n3->sonnet-5] Implement authentication middleware in src/middleware/auth.py`
-- ✅ CORRECT: `- [ ] T012 [P] [US1] [C:n3->sonnet-5] Create User model in src/models/user.py`
-- ✅ CORRECT: `- [ ] T014 [US1] [C:n4->opus-4-8] Implement UserService in src/services/user_service.py`
+- ✅ CORRECT: `- [ ] T001 [E:cli=cli-a|model=provider/model-a|effort=low|context=32000] Create project structure per implementation plan`
+- ✅ CORRECT: `- [ ] T005 [P] [E:cli=cli-b|model=provider/model-b|effort=medium|context=128000] Implement authentication middleware in src/middleware/auth.py`
+- ✅ CORRECT: `- [ ] T012 [P] [US1] [E:cli=cli-b|model=provider/model-b|effort=medium|context=128000] Create User model in src/models/user.py`
+- ✅ CORRECT: `- [ ] T014 [US1] [E:cli=cli-c|model=provider/model-c|effort=high|context=200000] Implement UserService in src/services/user_service.py`
 - ❌ WRONG: `- [ ] Create User model` (missing ID and Story label)
 - ❌ WRONG: `T001 [US1] Create model` (missing checkbox)
 - ❌ WRONG: `- [ ] [US1] Create User model` (missing Task ID)
