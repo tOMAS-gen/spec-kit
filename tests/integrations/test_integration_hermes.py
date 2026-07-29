@@ -12,6 +12,8 @@ non-destructive to a developer's real Hermes installation.
 
 from pathlib import Path
 
+import pytest
+
 from specify_cli.integrations import get_integration
 from specify_cli.integrations.manifest import IntegrationManifest
 
@@ -23,6 +25,25 @@ def _fake_home(tmp_path: Path) -> Path:
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     return home
+
+
+@pytest.fixture(autouse=True)
+def _isolate_hermes_home(monkeypatch):
+    """Keep Hermes-home resolution hermetic and driven by ``Path.home()``.
+
+    ``HermesIntegration`` now resolves its skills dir the same way Hermes does:
+    ``$HERMES_HOME`` first, then a Windows ``%LOCALAPPDATA%`` path, then
+    ``~/.hermes``.  Tests below isolate ``Path.home()`` and assert the
+    ``~/.hermes`` layout, so this fixture drops ``HERMES_HOME`` and pins the
+    resolver to the POSIX branch — otherwise a real ``HERMES_HOME`` (dev/CI) or
+    a Windows runner would send the skills to a different directory and the
+    assertions would target the wrong path.  The Windows/``HERMES_HOME``
+    branches are covered explicitly by ``TestHermesHomeResolution``.
+    """
+    import specify_cli.integrations.hermes as hermes_mod
+
+    monkeypatch.delenv("HERMES_HOME", raising=False)
+    monkeypatch.setattr(hermes_mod.sys, "platform", "linux", raising=False)
 
 
 class TestHermesIntegration(SkillsIntegrationTests):
@@ -388,3 +409,56 @@ class TestHermesBuildExecArgs:
         )
         i = get_integration("hermes")
         assert i.build_exec_args("/speckit-plan hi")[0] == "/custom/hermes"
+
+
+class TestHermesHomeResolution:
+    """The skills dir must match Hermes' own home resolution on every platform.
+
+    Regression guard: skills were hard-coded to ``~/.hermes/skills`` which is
+    wrong on Windows (Hermes uses ``%LOCALAPPDATA%\\hermes``), so the desktop
+    app never saw the installed skills.
+    """
+
+    def _skills_dir(self):
+        from specify_cli.integrations.hermes import HermesIntegration
+
+        return HermesIntegration._hermes_home_skills_dir()
+
+    def test_hermes_home_env_wins_on_any_platform(self, monkeypatch, tmp_path):
+        import specify_cli.integrations.hermes as hermes_mod
+
+        custom = tmp_path / "profiles" / "work"
+        monkeypatch.setenv("HERMES_HOME", str(custom))
+        # Even on Windows, an explicit HERMES_HOME takes precedence.
+        monkeypatch.setattr(hermes_mod.sys, "platform", "win32")
+        assert self._skills_dir() == custom / "skills"
+
+    def test_windows_uses_localappdata_not_dot_hermes(self, monkeypatch, tmp_path):
+        import specify_cli.integrations.hermes as hermes_mod
+
+        monkeypatch.delenv("HERMES_HOME", raising=False)
+        monkeypatch.setattr(hermes_mod.sys, "platform", "win32")
+        local_appdata = tmp_path / "AppData" / "Local"
+        monkeypatch.setenv("LOCALAPPDATA", str(local_appdata))
+        assert self._skills_dir() == local_appdata / "hermes" / "skills"
+
+    def test_windows_without_localappdata_falls_back_under_home(
+        self, monkeypatch, tmp_path
+    ):
+        import specify_cli.integrations.hermes as hermes_mod
+
+        monkeypatch.delenv("HERMES_HOME", raising=False)
+        monkeypatch.delenv("LOCALAPPDATA", raising=False)
+        monkeypatch.setattr(hermes_mod.sys, "platform", "win32")
+        home = tmp_path / "home"
+        monkeypatch.setattr(Path, "home", lambda: home)
+        assert self._skills_dir() == home / "AppData" / "Local" / "hermes" / "skills"
+
+    def test_posix_uses_dot_hermes(self, monkeypatch, tmp_path):
+        import specify_cli.integrations.hermes as hermes_mod
+
+        monkeypatch.delenv("HERMES_HOME", raising=False)
+        monkeypatch.setattr(hermes_mod.sys, "platform", "linux")
+        home = tmp_path / "home"
+        monkeypatch.setattr(Path, "home", lambda: home)
+        assert self._skills_dir() == home / ".hermes" / "skills"

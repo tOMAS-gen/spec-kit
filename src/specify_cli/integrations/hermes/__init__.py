@@ -12,6 +12,8 @@ Usage::
 
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 from shutil import rmtree
 from typing import Any
@@ -26,13 +28,15 @@ from ..manifest import IntegrationManifest
 class HermesIntegration(SkillsIntegration):
     """Integration for Hermes Agent skills.
 
-    Hermes loads skills from ``~/.hermes/skills/`` (user home directory)
-    rather than a project-local path.  Skills are installed directly to
-    the global directory — no project-local copies are created since
-    Hermes discovers them globally.  A project-local marker directory
-    (``.hermes/skills/`` empty) is created so extension commands (e.g.
-    git) can detect Hermes as an active integration.  Uninstall removes
-    both the marker and all global ``speckit-*`` skills, matching the
+    Hermes loads skills from its global skills directory (user home) rather
+    than a project-local path.  That directory is resolved the same way Hermes
+    itself resolves it — ``$HERMES_HOME`` when set, ``%LOCALAPPDATA%\\hermes``
+    on Windows, and ``~/.hermes`` on macOS/Linux (see :meth:`_hermes_home_dir`).
+    Skills are installed directly to that global directory — no project-local
+    copies are created since Hermes discovers them globally.  A project-local
+    marker directory (``.hermes/skills/`` empty) is created so extension
+    commands (e.g. git) can detect Hermes as an active integration.  Uninstall
+    removes both the marker and all global ``speckit-*`` skills, matching the
     standard integration teardown behaviour.
     """
 
@@ -55,9 +59,40 @@ class HermesIntegration(SkillsIntegration):
     # -- Helpers -----------------------------------------------------------
 
     @staticmethod
-    def _hermes_home_skills_dir() -> Path:
-        """Return ``~/.hermes/skills/`` — the global skills directory."""
-        return Path.home() / ".hermes" / "skills"
+    def _hermes_home_dir() -> Path:
+        """Return the Hermes home directory, matching Hermes' own resolution.
+
+        Mirrors ``hermes_constants.get_hermes_home()`` so Spec Kit installs
+        skills exactly where the running Hermes (CLI **and** desktop app) looks
+        for them:
+
+        1. ``$HERMES_HOME`` when set (active profile / custom home).
+        2. On Windows: ``%LOCALAPPDATA%\\hermes`` (falling back to
+           ``%USERPROFILE%\\AppData\\Local\\hermes``) — Hermes does **not** use
+           ``~/.hermes`` on Windows, so hard-coding it hides the skills from
+           the desktop app.
+        3. Everywhere else: ``~/.hermes``.
+        """
+        override = os.environ.get("HERMES_HOME", "").strip()
+        if override:
+            return Path(override).expanduser()
+
+        if sys.platform == "win32":
+            local_appdata = os.environ.get("LOCALAPPDATA", "").strip()
+            base = Path(local_appdata) if local_appdata else Path.home() / "AppData" / "Local"
+            return base / "hermes"
+
+        return Path.home() / ".hermes"
+
+    @classmethod
+    def _hermes_home_skills_dir(cls) -> Path:
+        """Return the global Hermes skills directory (``<hermes-home>/skills``).
+
+        Resolves ``<hermes-home>`` via :meth:`_hermes_home_dir` so the location
+        is correct on Windows (``%LOCALAPPDATA%\\hermes\\skills``), under a
+        custom ``$HERMES_HOME``, and on macOS/Linux (``~/.hermes/skills``).
+        """
+        return cls._hermes_home_dir() / "skills"
 
     # -- Options -----------------------------------------------------------
 
