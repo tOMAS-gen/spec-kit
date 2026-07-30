@@ -5,7 +5,10 @@ from pathlib import Path
 import pytest
 
 from specify_cli.integrations import INTEGRATION_REGISTRY
-from specify_cli.integrations.dispatch_blocks import ASSIGNED_COMMAND_PLACEHOLDER_RE
+from specify_cli.integrations.dispatch_blocks import (
+    ASSIGNED_COMMAND_PLACEHOLDER_RE,
+    TASK_INTERACTION_PLACEHOLDER,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 COMMANDS_DIR = ROOT / "templates" / "commands"
@@ -52,8 +55,35 @@ def test_assigned_command_render_is_cli_neutral():
         assert not ASSIGNED_COMMAND_PLACEHOLDER_RE.search(output), key
         assert "commands` entry keyed by `specify`" in output, key
         assert "ASSIGNED_COMMAND_WORKER: specify" in output, key
+        assert "Delegated User Interaction and Resume Protocol" in output, key
+        assert ".specify/orchestration/runs/<run_id>/" in output, key
+        assert ".specify/orchestration/.gitignore" in output, key
+        assert "Never stage a run directory" in output, key
+        assert "offer to" in output, key
+        assert "resume it instead of creating another run" in output, key
+        assert "SPECKIT_CONTROL awaiting_user_input <run_id>" in output, key
+        assert "principal must extract" in output, key
+        assert "`execution.session.capture`" in output, key
+        assert "Never select a fallback executor" in output, key
+        assert "session.mode: \"native\"" in output, key
+        assert "session.mode: \"checkpoint\"" in output, key
         assert "subagent_type" not in output, key
         assert "hermes chat" not in output, key
+
+
+def test_implement_renders_the_same_task_interaction_protocol():
+    raw = (COMMANDS_DIR / "implement.md").read_text(encoding="utf-8")
+    output = INTEGRATION_REGISTRY["generic"].process_template(
+        raw,
+        "generic",
+        "sh",
+        "$ARGUMENTS",
+    )
+
+    assert TASK_INTERACTION_PLACEHOLDER not in output
+    assert "Delegated User Interaction and Resume Protocol" in output
+    assert "status: \"awaiting_user_input\"" in output
+    assert "same CLI, model, effort, and context" in output
 
 
 @pytest.mark.parametrize("key", ["hermes", "opencode"])

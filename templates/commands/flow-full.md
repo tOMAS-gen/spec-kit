@@ -39,9 +39,31 @@ Run each phase by **fully following the instructions of the corresponding Spec K
 
 ### Phase rules (apply to every phase)
 
+- Before creating a run, inspect `.specify/orchestration/flows/` for a
+  non-terminal full-flow state matching this feature. If one exists, ask
+  whether to resume it; when accepted, restore its flags, current phase,
+  completed phases, child `run_id`, pending question, loop iteration, and
+  status instead of starting again.
+- When no run is resumed, generate a unique `flow_run_id` and atomically create
+  `.specify/orchestration/flows/<flow_run_id>/state.json`. Record the same
+  fields and update them before and after every phase so an interrupted flow
+  can continue without replaying completed phases.
+- Ensure `.specify/orchestration/.gitignore` excludes runtime state, never stage
+  a flow/run directory, and restrict state-file permissions to the current user
+  when supported.
 - Announce each phase before starting: `▶ Flow [N/10]: <command>`.
 - **User questions are NEVER suppressed — in ANY phase, under ANY flag**: if a phase needs a user decision, clarification, or confirmation (per its own instructions), ASK and WAIT for the answer before continuing. Never auto-answer, never assume defaults for something the phase would normally ask about, never skip a question because the flow is "automatic" or because `--bypass` was passed. `--bypass` removes ONLY the implementation gate, nothing else. This applies especially to `clarify`, whose questions MUST be answered by the user. Automation chains phases; it does not silence questions.
-- If a phase FAILS or its output is invalid, STOP the flow, report which phase failed and why, and tell the user how to resume (fix the issue, then re-run the individual command and continue manually, or re-run this flow).
+- When a delegated phase returns `awaiting_user_input`, store its child
+  `run_id`, set the flow state to `awaiting_user_input`, and do not advance the
+  phase. Ask through the principal CLI, resume that exact child session or
+  checkpoint, and mark the phase complete only after the resumed command
+  completes. This pause is not a phase failure.
+- Questions originating in the flow itself, including constitution setup and
+  the implementation gate, are stored in the flow state before asking. Save
+  the answer and clear the pending question before continuing.
+- If a phase FAILS or its output is invalid, atomically set the flow state to
+  `failed`, preserve the current phase and child state, STOP the flow, report
+  which phase failed and why, and tell the user how to resume.
 - Do not skip phases (except constitution when it already exists). Do not reorder phases.
 
 ### 1. Constitution
@@ -70,7 +92,8 @@ Execute `__SPECKIT_COMMAND_CHECKLIST__`. If checklist items FAIL, fix the spec/p
 ### 6. Tasks
 
 Execute `__SPECKIT_COMMAND_TASKS__`. Every task must carry its complete
-`[E:cli=...|model=...|effort=...|context=...]` assignment.
+`[E:category=...|cli=...|model=...|effort=...|context=...]`
+assignment.
 
 ### 7. Analyze
 
@@ -108,3 +131,7 @@ At the end, output:
 - Implementation summary: tasks completed / total
 - Converge status: converged or remaining work
 - Suggested next step (review, PR, or re-run with `--loop`)
+
+Before reporting success, atomically set the flow state to `completed`, clear
+its pending question and child `run_id`, and retain the state as an audit and
+resume-safety record.

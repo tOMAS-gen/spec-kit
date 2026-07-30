@@ -95,6 +95,7 @@ __SPECKIT_ASSIGNED_COMMAND_BLOCK_TASKS__
    - Dependencies section showing story completion order
    - Parallel execution examples per story
    - Implementation strategy section (MVP first, incremental delivery)
+   - Task totals and allocation percentages per category and CLI
 
 ## Mandatory Post-Execution Hooks
 
@@ -155,7 +156,7 @@ The tasks.md should be immediately executable - each task must be specific enoug
 Every task MUST strictly follow this format:
 
 ```text
-- [ ] [TaskID] [P?] [Story?] [E:cli=<cli>|model=<model>|effort=<effort>|context=<tokens>] Description with file path
+- [ ] [TaskID] [P?] [Story?] [E:category=<category>|cli=<cli>|model=<model>|effort=<effort>|context=<tokens>] Description with file path
 ```
 
 **Format Components**:
@@ -171,13 +172,38 @@ Every task MUST strictly follow this format:
    - Polish phase: NO story label
 5. **[E:...] execution label**: REQUIRED for every task. It records the exact
    executor assignment that `implement` must use.
-   - Read the global `~/.specify/models.json` version 2 `models` and `clis`
-     catalogs.
-   - Evaluate the task's actual requirements directly, including affected
-     artifacts, reasoning needs, tools, context size, dependencies, and risk.
-   - Select one CLI/model combination capable of the task based on
-     intelligence, relevant benefits, effective context, supported effort,
-     speed, and cost.
+   - Read the global `~/.specify/models.json` version 3 `models`, `clis`, and
+     `implementation` sections. If the implementation categories or allocation
+     policy are absent or invalid, STOP and tell the user to run
+     `__SPECKIT_COMMAND_MODELS__`.
+   - Require `implementation.allocation_measurement` to equal `task_count`; do
+     not reinterpret another measurement.
+   - First generate the complete task set without executor labels. Then evaluate
+     every task's actual requirements, including affected artifacts, reasoning
+     needs, tools, context size, dependencies, scope, and risk. Assign exactly
+     one required category: `max`, `high`, `medium`, or `low`.
+   - Finish classifying every task before choosing any CLI or model. Count the
+     tasks in each category.
+   - For each category independently, convert its user-approved CLI percentages
+     into whole-task quotas:
+     1. Multiply the category task count by each target percentage and divide by
+        100.
+     2. Assign the integer floor of every result.
+     3. Distribute the remaining tasks by largest fractional remainder.
+     4. Break equal remainders using the stored target-array order.
+   - Consider only profiles in the task's required category that satisfy its
+     context and capability requirements. Never move a task to another category
+     merely to satisfy a quota.
+   - Within each category, assign the most constrained tasks first: fewest valid
+     profiles, then largest context need, then Task ID.
+   - For each task, choose an eligible CLI with remaining quota; prefer the CLI
+     with the largest remaining quota and break ties using target-array order.
+     When no eligible CLI has remaining quota, choose the first eligible CLI in
+     target-array order and record the quota deviation.
+   - When the selected CLI has multiple valid profiles in the category, use the
+     first valid profile in the user-approved profile order.
+   - Do not invent a profile, percentage, CLI preference, category change, or
+     vendor-specific rule.
    - `cli` must be an existing key from `clis`.
    - `model` must be the canonical model key from `models`, not the
      CLI-specific model string.
@@ -186,17 +212,23 @@ Every task MUST strictly follow this format:
      the literal `null` when effort is unsupported.
    - `context` must be a positive token count no larger than that
      availability's `context_window`.
+   - The exact CLI/model/effort/context combination must appear in the selected
+     category's configured profiles.
    - Write the label exactly as
-     `[E:cli=<cli>|model=<model>|effort=<effort>|context=<tokens>]`.
+     `[E:category=<category>|cli=<cli>|model=<model>|effort=<effort>|context=<tokens>]`.
      Do not omit fields and do not defer executor selection to `implement`.
+   - After assigning all tasks, report for every category its task count,
+     integer quota per CLI, actual assignment count, and actual percentage.
+     Explain deviations caused by context or unavailable-profile constraints;
+     do not rewrite valid assignments merely to force exact percentages.
 6. **Description**: Clear action with exact file path
 
 **Examples**:
 
-- ✅ CORRECT: `- [ ] T001 [E:cli=cli-a|model=provider/model-a|effort=low|context=32000] Create project structure per implementation plan`
-- ✅ CORRECT: `- [ ] T005 [P] [E:cli=cli-b|model=provider/model-b|effort=medium|context=128000] Implement authentication middleware in src/middleware/auth.py`
-- ✅ CORRECT: `- [ ] T012 [P] [US1] [E:cli=cli-b|model=provider/model-b|effort=medium|context=128000] Create User model in src/models/user.py`
-- ✅ CORRECT: `- [ ] T014 [US1] [E:cli=cli-c|model=provider/model-c|effort=high|context=200000] Implement UserService in src/services/user_service.py`
+- ✅ CORRECT: `- [ ] T001 [E:category=low|cli=cli-a|model=provider/model-a|effort=low|context=32000] Create project structure per implementation plan`
+- ✅ CORRECT: `- [ ] T005 [P] [E:category=medium|cli=cli-b|model=provider/model-b|effort=medium|context=128000] Implement authentication middleware in src/middleware/auth.py`
+- ✅ CORRECT: `- [ ] T012 [P] [US1] [E:category=medium|cli=cli-b|model=provider/model-b|effort=medium|context=128000] Create User model in src/models/user.py`
+- ✅ CORRECT: `- [ ] T014 [US1] [E:category=high|cli=cli-c|model=provider/model-c|effort=high|context=200000] Implement UserService in src/services/user_service.py`
 - ❌ WRONG: `- [ ] Create User model` (missing ID and Story label)
 - ❌ WRONG: `T001 [US1] Create model` (missing checkbox)
 - ❌ WRONG: `- [ ] [US1] Create User model` (missing Task ID)

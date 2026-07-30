@@ -13,11 +13,11 @@ description: "Task list template for feature implementation"
 
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
 
-## Format: `[ID] [P?] [Story] [E:cli=<cli>|model=<model>|effort=<effort>|context=<tokens>] Description`
+## Format: `[ID] [P?] [Story] [E:category=<category>|cli=<cli>|model=<model>|effort=<effort>|context=<tokens>] Description`
 
 - **[P]**: Can run in parallel (different files, no dependencies)
 - **[Story]**: Which user story this task belongs to (e.g., US1, US2, US3)
-- **[E:cli=...|model=...|effort=...|context=...]**: Exact executor assignment selected from the global `~/.specify/models.json` registry
+- **[E:category=...|cli=...|model=...|effort=...|context=...]**: Exact executor assignment selected from the user-configured implementation policy in global `~/.specify/models.json`
 - Include exact file paths in descriptions
 
 ## Path Conventions
